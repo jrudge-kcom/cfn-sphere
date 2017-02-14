@@ -1,0 +1,289 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description"              : "Generic Amazon Linux instance template with optional Chef Bootstrapping",
+    "Parameters"               : {
+        "pDependsOn": {
+			"Type" : "String",
+			"Description" : "Dummy parameter for forcing dependancy"
+		},
+		"pEnvironmentName"		: {
+            "Type" : "String",
+            "Description" : "The name of the environment being created",
+			"MinLength" : "3",
+			"MaxLength" : "7",
+			"ConstraintDescription" : "The name of the environment between 3 and 7 characters (Dev, Prod, DevSup etc.)"
+        },
+		"pEnvironmentNameLower"		: {
+            "Type" : "String",
+            "Description" : "The name of the environment being created",
+			"MinLength" : "3",
+			"MaxLength" : "7",
+			"ConstraintDescription" : "The name of the environment between 3 and 7 characters (Dev, Prod, DevSup etc.)"
+        },
+        "pEnvironmentNumber"	: {
+            "Type" : "String",
+            "Description" : "The number of the environment",
+			"MinLength" : "2",
+			"MaxLength" : "2",
+			"ConstraintDescription" : "The number of the environment (00-99)"
+        },
+		"pInstanceRole"			: {
+            "Type" : "String",
+            "Description" : "Role for the instances e.g. Bsn, Chf, Jkn (Min 3 Max 6 Characters)",
+			"MinLength": "3",
+			"MaxLength": "6"
+        },
+		"pInstanceIdentifer"	: {
+            "Type" : "String",
+            "Description" : "The instance dentifier (e.g. 101, 102, 201, 202)"
+        },
+		"pKeyPairName"			: {
+            "Description" : "Name of EC2 Key Pair",
+            "Type"        : "AWS::EC2::KeyPair::KeyName",
+            "ConstraintDescription" : "Must be a vaild EC2 Keypair available in the account"
+        },
+		"pInstanceType"			: {
+            "Description" : "Instance Type for instance",
+            "Type"        : "String",
+            "Default"     : "t2.micro",
+            "ConstraintDescription" : "must be a valid EC2 instance type."
+        },
+        "pInstanceAmi"			: {
+            "Type" : "String",
+            "Description" : "AMI Id for instance",
+            "Default"     : "ami-edb9069e",
+            "AllowedPattern" : "ami-[a-z0-9]*",
+            "ConstraintDescription" : "Must start ami-"
+        },
+		"pSecurityGroupList"	: {
+            "Type" : "List<AWS::EC2::SecurityGroup::Id>",
+            "Description" : "Security Groups to attach to instance",
+            "ConstraintDescription" : "Must be a valid security group ID"
+        },
+		"pSubnet"				: {
+            "Type" : "AWS::EC2::Subnet::Id",
+            "Description" : "Subnet Id for Instance",
+            "ConstraintDescription" : "Must be a valid subnet ID"
+        },
+		"pInstanceProfile"		: {
+            "Type" : "String",
+			 "Default" : "",
+            "Description" : "Role for the instances"
+        },
+		"pAZ"					: {
+			"Type" : "AWS::EC2::AvailabilityZone::Name",
+			"Description" : "AZ in which the instance will be created (used for volume creation)",
+			"AllowedValues" : [ "eu-west-1a", "eu-west-1b", "eu-west-1c" ]
+		},
+		"pAssignPublicIp"		: {
+			"Type" : "String",
+            "Description" : "Toggle true/false to assign a public ip address. Required even if you are assigning a pre-created EIP."
+		},
+		"pEIPAllocationId"		: {
+			"Type":"String",
+			"Description":"EIP Allocation ID if required. Used where a static IP is issued to a 3rd party",
+			"Default" : ""
+		},
+		"pDnsZone"				: {
+            "Type" : "String",
+            "Description" : "DNS Zone Name*"
+        },
+		"pRootVolSize"			: {
+			"Description" : "Size in GB of allocated additional Volume Size.",
+			"Type"        : "String"
+		},
+		"pCreateDataVol"		: {
+			"Description" : "Flag to create the Data Volume",
+			"Type"        : "String",
+			"Default"     : "true"
+		},
+		"pDataVolSize"			: {
+			"Description" : "Size in GB of allocated additional Volume Size.",
+			"Type"        : "String"
+		},
+		"pDataVolumeDev"		: {
+			"Description" : "Data Volume Device Mapping",
+			"Type"        : "String"
+		},
+		"pDataDirectory"		: {
+			"Description" : "Mount point for addditonal volume",
+			"Type"        : "String"
+		}
+    },
+	"Conditions": {
+		"cCreateAddtionalVolume" : { "Fn::Equals" : [ { "Ref" : "pCreateDataVol" }, "true" ]},
+		"cAssignPublicIp" : { "Fn::Equals" : [ { "Ref" : "pAssignPublicIp" }, "true" ]}
+	},
+    "Resources"                : {
+		"DataEBSVolume"		: {
+			"Condition": "cCreateAddtionalVolume",
+			"Type": "AWS::EC2::Volume",
+			"Properties": {
+			"AvailabilityZone": { "Ref" : "pAZ" },
+			"Size":  { "Ref" : "pDataVolSize" }
+			}
+		},
+		"Instance"			: {
+            "Type" : "AWS::EC2::Instance",
+            "Properties" : {
+				"ImageId": {
+					"Ref": "pInstanceAmi"
+				},
+				"BlockDeviceMappings": [
+					{
+						"DeviceName": "/dev/xvda",
+						"Ebs": {
+							"VolumeType": "gp2",
+							"DeleteOnTermination": "true",
+							"VolumeSize": {
+								"Ref": "pRootVolSize"
+							}
+						}
+					}
+				],
+				"NetworkInterfaces": {
+					"Fn::If": [
+						"cAssignPublicIp",
+						[
+							{
+								"AssociatePublicIpAddress": true,
+								"DeleteOnTermination": true,
+								"DeviceIndex": 0,
+								"SubnetId": {
+									"Ref": "pSubnet"
+								},
+								"GroupSet": {
+									"Ref": "pSecurityGroupList"
+								}
+							}
+						],
+						{
+							"Ref": "AWS::NoValue"
+						}
+					]
+				},
+				"Volumes": {
+					"Fn::If": [
+						"cCreateAddtionalVolume",
+						[
+							{
+								"VolumeId": {
+									"Ref": "DataEBSVolume"
+								},
+								"Device": {
+									"Ref": "pDataVolumeDev"
+								}
+							}
+						],
+						{
+							"Ref": "AWS::NoValue"
+						}
+					]
+				},
+				"InstanceType": {
+					"Ref": "pInstanceType"
+				},
+				"KeyName": {
+					"Ref": "pKeyPairName"
+				},
+				"SubnetId": {
+					"Fn::If": [
+						"cAssignPublicIp",
+						{
+							"Ref": "AWS::NoValue"
+						},
+						{
+							"Ref": "pSubnet"
+						}
+					]
+				},
+				"SecurityGroupIds": {
+					"Fn::If": [
+						"cAssignPublicIp",
+						{
+							"Ref": "AWS::NoValue"
+						},
+						{
+							"Ref": "pSecurityGroupList"
+						}
+					]
+				},
+				"IamInstanceProfile": {
+					"Ref": "pInstanceProfile"
+				},
+				"UserData": {
+					"Fn::Base64": {
+						"Fn::Join": [
+							"",
+							[
+								"#!/bin/bash -x\n",
+								"#### START FUNCTION TO CALL CFN INIT FAIL ####\n",
+								"function ERROR_EXIT\n",
+								"{\n",
+								" cfn-signal -e 1 -r \"$1\" '",
+								{
+									"Ref": "WaitHandle"
+								},
+								"'\n",
+								"   exit 1\n",
+								"}\n",
+								"#### END FUNCTION TO CALL CFN INIT FAIL ####\n",
+								"#### ADD AWS CLI TO PATH AND SET VARIABLE####\n",
+								"PATH=${PATH}:/opt/aws/bin",
+								"\n",
+								"AWSCMD=/usr/bin/aws",
+								"\n",
+								"##### START ELASTIC IP ASSOCIATION IF USING ####\n",
+								"#Associate Elastic IP Needs to happen before the CFN Metadata to ensure internet connectivity\n",
+								"AWS_INSTANCE_ID=$( curl http://169.254.169.254/latest/meta-data/instance-id )\n",
+								"ALLOCATION_ID=",
+								{
+									"Ref": "pEIPAllocationId"
+								},
+								"\n",
+								"if [[ $ALLOCATION_ID ]]; then ${AWSCMD} ec2 associate-address --instance-id ${AWS_INSTANCE_ID} --allocation-id ${ALLOCATION_ID} --allow-reassociation --region ",
+								{
+									"Ref": "AWS::Region"
+								},
+								" --cli-connect-timeout 60 --cli-read-timeout 60",
+								"|| ERROR_EXIT 'Failed to set EIP.'\n",
+								"fi",
+								"\n",
+								"##### END ELASTIC IP ASSOCIATION IF USING ####\n",
+								"#### START SIGNAL THE STATUS TO CFN-INIT #### \n",
+								"cfn-signal -e $? -r 'EC2 userdata executed successfully' '",
+								{
+									"Ref": "WaitHandle"
+								},
+								"'\n",
+								"#### END SIGNAL THE STATUS TO CFN-INIT ####"
+							]
+						]
+					}
+				},
+				"Tags": [
+				]
+			}
+        },
+		"WaitCondition"		: {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "Instance",
+			"Properties" : {
+				"Handle" : {
+					"Ref" : "WaitHandle"
+				},
+				"Timeout" : "600"
+			}
+		},
+		"WaitHandle"		: {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		}
+    },
+    "Outputs"                  : {
+		"oInstanceId"	   : {
+            "Value": {
+                "Ref": "Instance"
+			}
+		}
+	}
+}
